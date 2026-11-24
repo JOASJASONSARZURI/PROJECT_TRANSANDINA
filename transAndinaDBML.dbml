@@ -1,0 +1,152 @@
+// =====================================================
+// TransAndina - Épica 1: Configuración del servicio
+// HU-01 Rutas | HU-02 Buses | HU-03 Viajes | HU-04 Tarifas
+// Pegar en https://dbdiagram.io (notación crow's foot)
+// =====================================================
+
+Project transandina {
+  database_type: 'PostgreSQL'
+  Note: 'Épica 1 - Configuración del servicio'
+}
+
+// ---------- HU-01: Rutas ----------
+
+Table ciudad {
+  nombre text [pk, note: 'Cada ciudad se guarda una sola vez']
+
+  Note: 'HU-01. Catálogo de ciudades. Se alimenta desde fn_crear_ruta.'
+}
+
+Table ruta {
+  id_ruta int [pk, increment]
+  codigo text [not null, unique, note: 'Ej: CBBA-LPZ']
+
+  Note: 'HU-01. Recorrido entre varias paradas. Código único.'
+}
+
+Table ruta_parada {
+  ruta_id int [not null, ref: > ruta.id_ruta]
+  ciudad_nombre text [not null, ref: > ciudad.nombre]
+  posicion int [not null, note: 'Orden de la parada dentro de la ruta (1, 2, 3...)']
+
+  Indexes {
+    (ruta_id, posicion) [pk]
+    (ruta_id, ciudad_nombre) [unique, name: 'uq_ruta_ciudad']
+  }
+
+  checks {
+    `posicion >= 1` [name: 'ck_posicion_positiva']
+  }
+
+  Note: '''
+    HU-01. El orden es parte del negocio, por eso se guarda en columna `posicion`
+    y no en un arreglo.
+    - PK (ruta_id, posicion): no hay dos paradas en la misma posición.
+    - UNIQUE (ruta_id, ciudad_nombre): una ciudad no se repite en la misma ruta.
+    - Regla no expresable en DBML: la ruta debe tener >= 2 paradas
+      (se garantiza en fn_crear_ruta y/o con un constraint trigger DEFERRABLE).
+    - Regla no expresable en DBML: posiciones consecutivas desde 1 sin huecos.
+  '''
+}
+
+// ---------- HU-02: Buses ----------
+
+Table bus {
+  id_bus int [pk, increment]
+  placa text [not null, unique]
+  capacidad int [not null]
+  amenidades jsonb [not null, default: '{}', note: 'Comodidades variables: {"wifi": true, "tv": {"pantalla_por_asiento": true}}']
+
+  checks {
+    `capacidad BETWEEN 1 AND 80` [name: 'ck_capacidad']
+    `jsonb_typeof(amenidades) = 'object'` [name: 'ck_amenidades_objeto']
+  }
+
+  Indexes {
+    amenidades [type: gin, name: 'idx_bus_amenidades', note: 'jsonb_path_ops: filtro por contención @>']
+  }
+
+  Note: '''
+    HU-02. Amenidades en JSONB porque la empresa agrega comodidades nuevas sin
+    cambiar el esquema y cada una tiene detalle propio. Filtro con @> (contención).
+  '''
+}
+
+Table asiento {
+  bus_id int [not null, ref: > bus.id_bus]
+  numero int [not null]
+
+  Indexes {
+    (bus_id, numero) [pk]
+  }
+
+  checks {
+    `numero >= 1` [name: 'ck_numero_positivo']
+  }
+
+  Note: '''
+    HU-02. Se generan en fn_crear_bus (1..capacidad).
+    - Regla no expresable en DBML: numero <= bus.capacidad y que existan todos
+      (se garantiza al crear el bus; capacidad inmutable o trigger que lo proteja).
+  '''
+}
+
+// ---------- HU-03: Viajes ----------
+
+Table viaje {
+  id_viaje int [pk, increment]
+  ruta_id int [not null, ref: > ruta.id_ruta]
+  bus_id int [not null, ref: > bus.id_bus]
+  salida timestamptz [not null]
+  llegada timestamptz [not null]
+
+  checks {
+    `llegada > salida` [name: 'ck_llegada_posterior']
+  }
+
+  Indexes {
+    (bus_id, salida) [name: 'idx_viaje_bus_salida']
+    ruta_id [name: 'idx_viaje_ruta']
+  }
+
+  Note: '''
+    HU-03. Un bus no puede tener dos viajes con horarios cruzados.
+    En PostgreSQL se implementa con una restricción de exclusión (no expresable en DBML):
+      EXCLUDE USING gist (bus_id WITH =, tstzrange(salida, llegada, '[)') WITH &&)
+    (requiere CREATE EXTENSION btree_gist). Dos viajes consecutivos que no se cruzan se aceptan.
+  '''
+}
+
+// ---------- HU-04: Tarifas ----------
+
+Table tarifa {
+  id_tarifa int [pk, increment]
+  ruta_id int [not null]
+  origen_pos int [not null]
+  destino_pos int [not null]
+  precio numeric(10,2) [not null]
+  creada_en timestamptz [not null, default: `now()`]
+
+  checks {
+    `origen_pos < destino_pos` [name: 'ck_origen_antes_destino']
+    `precio > 0` [name: 'ck_precio_positivo']
+  }
+
+  Indexes {
+    (ruta_id, origen_pos, destino_pos, creada_en, id_tarifa) [name: 'idx_tarifa_vigente', note: 'Para obtener la última tarifa de un par (ORDER BY creada_en DESC, id_tarifa DESC LIMIT 1)']
+  }
+
+  Note: '''
+    HU-04. Tabla append-only: fijar una tarifa nueva inserta otra fila, nunca actualiza ni borra.
+    - Vigente = fila más reciente del par (desempate por id_tarifa).
+    - Se protege con trigger BEFORE UPDATE OR DELETE que lanza excepción.
+    - Si un par no tiene filas, no se puede vender ni reservar ese tramo.
+    - El pasaje guardará su propio precio congelado (Épica 2).
+  '''
+}
+
+// ---------- Relaciones compuestas ----------
+// Garantizan que las posiciones de la tarifa existan en la ruta.
+
+Ref: tarifa.(ruta_id, origen_pos) > ruta_parada.(ruta_id, posicion)
+Ref: tarifa.(ruta_id, destino_pos) > ruta_parada.(ruta_id, posicion)
