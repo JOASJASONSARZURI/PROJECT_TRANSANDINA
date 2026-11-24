@@ -1,13 +1,22 @@
 // =====================================================
-// TransAndina - Épica 1: Configuración del servicio
-// HU-01 Rutas | HU-02 Buses | HU-03 Viajes | HU-04 Tarifas
+// TransAndina - Modelo completo (Épicas 1 a 5)
+// Épica 1: HU-01 Rutas | HU-02 Buses | HU-03 Viajes | HU-04 Tarifas
+// Épica 2: HU-05 a HU-10 Venta | HU-16 Promociones
+// Épica 3: HU-11, 12, 18 Reportes | HU-13 Auditoría | HU-17 Incidencias
+// Épica 4: HU-14 Venta simultánea | HU-15 Rendimiento
+// Épica 5: HU-19 Tipos | HU-20 Encomiendas | HU-21 Búsqueda
+// Anexo:   fn_manifiesto (lista de pasajeros a bordo)
 // Pegar en https://dbdiagram.io (notación crow's foot)
 // =====================================================
 
 Project transandina {
   database_type: 'PostgreSQL'
-  Note: 'Épica 1 - Configuración del servicio'
+  Note: 'TransAndina - Épicas 1 a 5'
 }
+
+// =====================================================
+// ÉPICA 1 - CONFIGURACIÓN DEL SERVICIO
+// =====================================================
 
 // ---------- HU-01: Rutas ----------
 
@@ -69,15 +78,17 @@ Table bus {
   Note: '''
     HU-02. Amenidades en JSONB porque la empresa agrega comodidades nuevas sin
     cambiar el esquema y cada una tiene detalle propio. Filtro con @> (contención).
+    El resultado de fn_buses_con_amenidades se ordena por id_bus.
   '''
 }
 
 Table asiento {
+  id_asiento int [pk, increment]
   bus_id int [not null, ref: > bus.id_bus]
   numero int [not null]
 
   Indexes {
-    (bus_id, numero) [pk]
+    (bus_id, numero) [unique, name: 'uq_asiento_bus_numero']
   }
 
   checks {
@@ -86,6 +97,7 @@ Table asiento {
 
   Note: '''
     HU-02. Se generan en fn_crear_bus (1..capacidad).
+    id_asiento permite que pasaje referencie el asiento con una FK simple.
     - Regla no expresable en DBML: numero <= bus.capacidad y que existan todos
       (se garantiza al crear el bus; capacidad inmutable o trigger que lo proteja).
   '''
@@ -124,8 +136,8 @@ Table tarifa {
   ruta_id int [not null]
   origen_pos int [not null]
   destino_pos int [not null]
-  precio numeric(10,2) [not null]
-  creada_en timestamptz [not null, default: `now()`]
+  precio numeric [not null]
+  creada_en timestamptz [not null, default: `clock_timestamp()`]
 
   checks {
     `origen_pos < destino_pos` [name: 'ck_origen_antes_destino']
@@ -133,20 +145,340 @@ Table tarifa {
   }
 
   Indexes {
-    (ruta_id, origen_pos, destino_pos, creada_en, id_tarifa) [name: 'idx_tarifa_vigente', note: 'Para obtener la última tarifa de un par (ORDER BY creada_en DESC, id_tarifa DESC LIMIT 1)']
+    (ruta_id, origen_pos, destino_pos, id_tarifa) [name: 'idx_tarifa_vigente', note: 'Vigente = mayor id_tarifa del par: ORDER BY id_tarifa DESC LIMIT 1']
   }
 
   Note: '''
     HU-04. Tabla append-only: fijar una tarifa nueva inserta otra fila, nunca actualiza ni borra.
-    - Vigente = fila más reciente del par (desempate por id_tarifa).
+    - Vigente = fila con mayor id_tarifa para (ruta_id, origen_pos, destino_pos).
     - Se protege con trigger BEFORE UPDATE OR DELETE que lanza excepción.
+    - fn_fijar_tarifa convierte nombres de ciudad a posiciones dentro de la ruta.
     - Si un par no tiene filas, no se puede vender ni reservar ese tramo.
-    - El pasaje guardará su propio precio congelado (Épica 2).
+    - El pasaje guarda su propio precio congelado (tabla pasaje).
+    - Auditada por trigger AFTER INSERT (HU-13).
   '''
 }
 
-// ---------- Relaciones compuestas ----------
-// Garantizan que las posiciones de la tarifa existan en la ruta.
+// =====================================================
+// ÉPICA 2 - VENTA
+// =====================================================
 
+// ---------- HU-07: Pasajeros ----------
+
+Table pasajero {
+  ci text [pk]
+  nombre text [not null]
+
+  checks {
+    `btrim(ci) <> ''` [name: 'ck_ci_no_vacio']
+    `btrim(nombre) <> ''` [name: 'ck_nombre_no_vacio']
+  }
+
+  Note: '''
+    HU-07. El CI identifica al pasajero. Al vender o reservar se hace
+    INSERT ... ON CONFLICT (ci) DO UPDATE SET nombre = EXCLUDED.nombre.
+  '''
+}
+
+// ---------- HU-16: Promociones ----------
+
+Table promocion {
+  id_promocion int [pk, increment]
+  nombre text [not null]
+  porcentaje numeric [not null]
+  condiciones jsonb [not null, default: '{}']
+  creada_en timestamptz [not null, default: `clock_timestamp()`]
+
+  checks {
+    `btrim(nombre) <> ''` [name: 'ck_promo_nombre']
+    `porcentaje > 0 AND porcentaje < 100` [name: 'ck_promo_porcentaje']
+    `jsonb_typeof(condiciones) = 'object'` [name: 'ck_promo_cond_objeto']
+    `(condiciones - ARRAY['ruta','desde','hasta','dias_semana','antelacion_min_dias']) = '{}'::jsonb` [name: 'ck_promo_claves_validas']
+  }
+
+  Note: '''
+    HU-16. Condiciones admitidas (todas opcionales; la que falta no limita):
+      ruta (código), desde (fecha), hasta (fecha),
+      dias_semana (arreglo de enteros 1..7), antelacion_min_dias (entero >= 0).
+    - El CHECK rechaza cualquier otra clave.
+    - No expresable en DBML (se valida en fn_crear_promocion):
+        * tipo de cada valor (fechas válidas, dias_semana entre 1 y 7, antelación entera >= 0)
+        * que la ruta exista
+        * desde <= hasta
+    - Al vender/reservar se elige la de mayor porcentaje que cumpla todo;
+      empate -> menor creada_en (luego menor id_promocion).
+    - Fechas y días se evalúan con (salida AT TIME ZONE 'America/La_Paz').
+  '''
+}
+
+// ---------- HU-05, 08, 09, 10: Pasajes y reservas ----------
+
+Table pasaje {
+  id_pasaje int [pk, increment, note: 'También es el id de la reserva (fn_pagar_reserva recibe este id)']
+  viaje_id int [not null, ref: > viaje.id_viaje]
+  asiento_id int [not null, ref: > asiento.id_asiento]
+  pasajero_ci text [not null, ref: > pasajero.ci]
+  origen_pos int [not null, note: 'Posición de la parada de subida']
+  destino_pos int [not null, note: 'Posición de la parada de bajada']
+  precio_base numeric [not null, note: 'Tarifa vigente al vender/reservar, sin promoción']
+  precio_vendido numeric [not null, note: 'Precio con descuento redondeado a centavos; congelado']
+  estado text [not null, note: 'pagado | reservado | vencido | anulado']
+  vence_en timestamptz [note: 'Solo reservas; ocupa asiento si estado = reservado y vence_en > now()']
+  promocion_id int [ref: > promocion.id_promocion, note: 'NULL si no hubo promoción']
+  creado_en timestamptz [not null, default: `clock_timestamp()`, note: 'Fecha de compra/reserva (para la antelación de HU-16)']
+  anulado_en timestamptz
+
+  checks {
+    `origen_pos < destino_pos` [name: 'ck_pasaje_tramo']
+    `precio_base > 0` [name: 'ck_pasaje_precio_base']
+    `precio_vendido > 0 AND precio_vendido <= precio_base` [name: 'ck_pasaje_precio_vendido']
+    `estado IN ('pagado','reservado','vencido','anulado')` [name: 'ck_pasaje_estado']
+    `estado NOT IN ('reservado','vencido') OR vence_en IS NOT NULL` [name: 'ck_reserva_con_vencimiento']
+    `(estado = 'anulado') = (anulado_en IS NOT NULL)` [name: 'ck_anulado_fecha']
+  }
+
+  Indexes {
+    (viaje_id, asiento_id, origen_pos, destino_pos) [name: 'idx_pasaje_viaje_asiento', note: 'HU-06: asientos ocupados por tramo']
+    (viaje_id, estado) [name: 'idx_pasaje_viaje_estado', note: 'HU-11/12 y limpieza de reservas vencidas']
+    (pasajero_ci, viaje_id) [name: 'idx_pasaje_pasajero_viaje', note: 'HU-07 y manifiesto']
+    promocion_id [name: 'idx_pasaje_promocion', note: 'HU-18 (parcial: estado = pagado)']
+  }
+
+  Note: '''
+    Una sola tabla para ventas y reservas (HU-05, 08, 09, 10):
+    - Venta directa: estado = 'pagado'.
+    - Reserva: estado = 'reservado' con vence_en = now() + vigencia (> 0).
+    - Pago de reserva: solo si estado = 'reservado' y vence_en > now(); conserva precios.
+    - Anulación: estado = 'anulado' + anulado_en; nunca DELETE (trigger BEFORE DELETE lanza excepción).
+    - 'vencido': lo marca fn_vender_pasaje / fn_reservar al limpiar reservas con vence_en <= now()
+      del viaje antes de insertar. Las consultas igual filtran por vence_en, sin depender de esa limpieza.
+    - Auditada por triggers AFTER INSERT/UPDATE/DELETE (HU-13).
+
+    Restricciones de exclusión (HU-14 y HU-07), requieren CREATE EXTENSION btree_gist:
+      EXCLUDE USING gist (viaje_id WITH =, asiento_id WITH =,
+                          int4range(origen_pos, destino_pos) WITH &&)
+        WHERE (estado IN ('pagado','reservado'))
+      EXCLUDE USING gist (viaje_id WITH =, pasajero_ci WITH =,
+                          int4range(origen_pos, destino_pos) WITH &&)
+        WHERE (estado IN ('pagado','reservado'))
+    - int4range es [origen, destino): bajar y subir en la misma parada NO solapa.
+    - Una de las dos transacciones falla con exclusion_violation (23P01) al insertar o al confirmar;
+      la función lo captura y relanza con RAISE EXCEPTION.
+
+    Reglas no expresables en DBML (funciones/triggers):
+    - El asiento pertenece al bus del viaje (asiento.bus_id = viaje.bus_id).
+    - origen_pos y destino_pos existen en ruta_parada de la ruta del viaje.
+    - Debe existir tarifa para el par; si no, excepción.
+    - No vender si viaje.salida <= now(); no anular si ya salió.
+    - Transiciones válidas: reservado -> pagado | vencido | anulado; pagado -> anulado.
+  '''
+}
+
+// =====================================================
+// ÉPICA 3 - REPORTES Y CONTROL
+// =====================================================
+
+// ---------- HU-17: Incidencias ----------
+
+Table incidencia {
+  id_incidencia int [pk, increment]
+  viaje_id int [not null, ref: > viaje.id_viaje]
+  tipo text [not null, note: 'retraso | averia | control']
+  datos jsonb [not null, note: 'Forma según el tipo (ver Note)']
+  creada_en timestamptz [not null, default: `clock_timestamp()`]
+
+  checks {
+    `tipo IN ('retraso','averia','control')` [name: 'ck_incidencia_tipo']
+    `jsonb_typeof(datos) = 'object'` [name: 'ck_incidencia_datos_objeto']
+    `fn_incidencia_valida(tipo, datos)` [name: 'ck_incidencia_datos_validos']
+  }
+
+  Indexes {
+    (viaje_id, tipo) [name: 'idx_incidencia_viaje_tipo', note: 'fn_retraso_total: suma de minutos de retrasos por viaje']
+  }
+
+  Note: '''
+    HU-17. Datos que cambian según el tipo -> JSONB validado en la base:
+      retraso: {"minutos": entero > 0 (número JSON, no texto), "motivo": texto no vacío}
+      averia:  {"descripcion": texto no vacío, "requiere_cambio_bus": booleano true/false}
+      control: {"lugar": texto no vacío, "resultado": "sin novedad" | "observado"}
+    - fn_incidencia_valida(tipo, datos) es una función IMMUTABLE usada en el CHECK.
+      Revisa jsonb_typeof de cada dato (rechaza "12" como texto), claves faltantes y valores fuera de dominio.
+    - Decisión: claves adicionales no se rechazan (el backlog solo rechaza datos faltantes o mal escritos).
+    - fn_retraso_total(viaje) = COALESCE(SUM((datos->>'minutos')::int) WHERE tipo = 'retraso', 0).
+    - Alternativa descartada: una tabla por tipo (más tablas y JOINs para datos que solo se registran y se suman).
+  '''
+}
+
+// ---------- HU-13: Auditoría ----------
+
+Table auditoria {
+  id_auditoria bigint [pk, increment]
+  tabla text [not null, note: "'pasaje' | 'tarifa'"]
+  operacion text [not null, note: 'INSERT | UPDATE | DELETE']
+  fecha timestamptz [not null, default: `clock_timestamp()`]
+  datos_anteriores jsonb [note: 'to_jsonb(OLD); NULL en INSERT']
+  datos_nuevos jsonb [note: 'to_jsonb(NEW); NULL en DELETE']
+
+  checks {
+    `operacion IN ('INSERT','UPDATE','DELETE')` [name: 'ck_auditoria_operacion']
+    `tabla IN ('pasaje','tarifa')` [name: 'ck_auditoria_tabla']
+  }
+
+  Indexes {
+    (tabla, fecha) [name: 'idx_auditoria_tabla_fecha']
+  }
+
+  Note: '''
+    HU-13. Sin FK a pasaje ni tarifa: el historial debe sobrevivir a cualquier cambio de esas tablas.
+    - Se llena con triggers AFTER INSERT OR UPDATE OR DELETE FOR EACH ROW en pasaje y tarifa
+      (función genérica fn_auditar() con TG_TABLE_NAME, TG_OP, to_jsonb(OLD), to_jsonb(NEW)).
+    - Se ejecuta en la misma transacción: si la operación se revierte, su registro también.
+    - Los intentos de UPDATE/DELETE que los triggers BEFORE rechazan (tarifa, DELETE de pasaje)
+      no llegan a modificar la fila y por tanto no generan registro.
+    - Tabla append-only: trigger BEFORE UPDATE OR DELETE que lanza excepción.
+    - VIEW v_auditoria (tabla, operacion, fecha, datos_anteriores, datos_nuevos)
+      = SELECT de esas columnas de auditoria (sin id_auditoria), ordenada por id_auditoria.
+  '''
+}
+
+// =====================================================
+// ÉPICA 5 - ENCOMIENDAS
+// =====================================================
+
+// ---------- HU-19: Tipos de encomienda ----------
+
+Table tipo_encomienda {
+  tipo text [not null]
+  version int [not null]
+  campos jsonb [not null, default: '{}', note: 'Datos obligatorios del tipo: {"peso_kg": "numero_positivo", "especie": "texto"}']
+  vigencia_desde timestamptz [not null, default: `clock_timestamp()`]
+
+  Indexes {
+    (tipo, version) [pk]
+  }
+
+  checks {
+    `btrim(tipo) <> ''` [name: 'ck_tipo_no_vacio']
+    `version >= 1` [name: 'ck_tipo_version']
+    `jsonb_typeof(campos) = 'object'` [name: 'ck_tipo_campos_objeto']
+    `fn_campos_validos(campos)` [name: 'ck_tipo_campos_clases']
+  }
+
+  Note: '''
+    HU-19. Catálogo versionado de tipos. Redefinir un tipo INSERTA la versión siguiente
+    (fn_definir_tipo_encomienda); nunca actualiza ni borra (trigger BEFORE UPDATE OR DELETE).
+    - Versión vigente de un tipo = mayor `version`. Las encomiendas ya registradas siguen
+      apuntando a la versión con la que se validaron: no se modifican ni se invalidan.
+    - Clases admitidas: texto | numero | numero_positivo | si_no. fn_campos_validos (IMMUTABLE)
+      rechaza clases desconocidas, valores que no sean texto y la clave reservada "destinatario".
+    - Datos iniciales (en el script): documento v1 {}, paquete v1 {"peso_kg":"numero_positivo"},
+      perecible v1 {"peso_kg":"numero_positivo","temperatura_max_c":"numero"}.
+    - Decisión columnas/tablas/JSONB: los campos exigidos cambian por tipo y se agregan sin
+      programador -> JSONB como definición. Alternativa descartada: tabla tipo_campo (filas por campo),
+      que obliga a armar el JSON en cada validación sin ganar integridad real.
+  '''
+}
+
+// ---------- HU-20: Encomiendas ----------
+
+Table encomienda {
+  id_encomienda int [pk, increment]
+  viaje_id int [not null, ref: > viaje.id_viaje]
+  origen_pos int [not null]
+  destino_pos int [not null]
+  tipo text [not null]
+  tipo_version int [not null, note: 'Versión del tipo con la que se validó (la asigna el trigger)']
+  atributos jsonb [not null, note: '{"destinatario": {"nombre": "...", "telefono": "..."}, ...datos del tipo y extras}']
+  creada_en timestamptz [not null, default: `clock_timestamp()`]
+
+  checks {
+    `origen_pos < destino_pos` [name: 'ck_encomienda_tramo']
+    `jsonb_typeof(atributos) = 'object'` [name: 'ck_encomienda_atributos_objeto']
+    `fn_destinatario_valido(atributos)` [name: 'ck_encomienda_destinatario']
+  }
+
+  Indexes {
+    atributos [type: gin, name: 'idx_encomienda_atributos', note: 'jsonb_path_ops: HU-21, búsqueda por contención @>']
+    viaje_id [name: 'idx_encomienda_viaje']
+  }
+
+  Note: '''
+    HU-20. Validación 100% en la base:
+    - CHECK fn_destinatario_valido(atributos): destinatario.nombre texto no vacío;
+      destinatario.telefono, si existe, es texto.
+    - Trigger BEFORE INSERT: busca la última versión del tipo (si no existe -> excepción), la guarda en
+      tipo_version, exige cada campo obligatorio con su clase (jsonb_typeof: un peso "12" como texto se
+      rechaza; numero_positivo > 0; si_no = booleano) y valida que origen/destino existan en
+      ruta_parada de la ruta del viaje (la tabla no guarda ruta_id).
+    - Datos extra (fragil, dimensiones, ...) se aceptan y se conservan tal cual.
+    - Trigger BEFORE UPDATE: no permite cambiar tipo, tipo_version ni atributos
+      (las encomiendas anteriores no se modifican).
+
+    HU-21. fn_buscar_encomiendas(filtro) = SELECT id_encomienda FROM encomienda
+    WHERE atributos @> filtro ORDER BY id_encomienda. Coincide si contiene todos los datos buscados,
+    aunque tenga otros (incluye {"destinatario": {"telefono": "7xxxxxxx"}}). Usa el índice GIN.
+    Decisión: JSONB + GIN porque se busca por cualquier combinación de datos de forma variable.
+  '''
+}
+
+// =====================================================
+// ANEXO - fn_manifiesto(viaje) -> jsonb (sin tablas nuevas)
+// =====================================================
+// Lista de pasajeros a bordo: une pasaje, pasajero, asiento y ruta_parada (nombres de origen y destino)
+// con estado = 'pagado' (o 'reservado' con vence_en > now(), según lo que defina el grupo);
+// ordenada por número de asiento y origen. Usa idx_pasaje_viaje_estado.
+
+// =====================================================
+// REPORTES (HU-11, HU-12, HU-18): sin tablas nuevas
+// =====================================================
+// HU-11 fn_ocupacion(viaje): une ruta_parada consecutivas (posicion n y n+1) de la ruta del viaje
+//   y cuenta pasajes con estado = 'pagado', o estado = 'reservado' y vence_en > now(),
+//   donde origen_pos <= n AND destino_pos >= n+1. LEFT JOIN para devolver también segmentos con 0.
+//   Una fila por segmento, ordenada por posición. Usa idx_pasaje_viaje_estado.
+// HU-12 fn_ingresos_viaje(viaje): COALESCE(SUM(precio_vendido), 0) con estado = 'pagado'.
+// HU-18 fn_descuento_otorgado(promo): COALESCE(SUM(precio_base - precio_vendido), 0)
+//   con promocion_id = promo y estado = 'pagado'.
+
+// =====================================================
+// ÉPICA 4 - OPERACIÓN CONFIABLE (sin tablas nuevas)
+// =====================================================
+
+Note epica4_operacion_confiable {
+  '''
+  HU-14 Venta simultánea (tabla pasaje)
+  - EXCLUDE USING gist (viaje_id =, asiento_id =, int4range(origen_pos, destino_pos) &&)
+    WHERE estado IN ('pagado','reservado'): dos ventas en conflicto, exactamente una gana,
+    aunque ambas transacciones estén abiertas (el índice espera a la otra transacción).
+  - Segundo seguro: pg_advisory_xact_lock(viaje_id, asiento_id) al inicio de fn_vender_pasaje / fn_reservar.
+  - Limpieza previa: reservas con vence_en <= now() del viaje pasan a 'vencido' antes de insertar.
+
+  HU-03 (tabla viaje)
+  - EXCLUDE USING gist (bus_id =, tstzrange(salida, llegada, '[)') &&): sin viajes cruzados del mismo bus.
+
+  Validación de estados (tabla pasaje)
+  - CHECK de estado, vence_en obligatorio en reservas, anulado_en coherente con estado,
+    y trigger de transiciones válidas.
+
+  HU-15 Rendimiento: índices (se justifican con EXPLAIN ANALYZE antes/después)
+  - pasaje: los dos EXCLUDE (sirven también como índices de búsqueda por asiento y por pasajero),
+    (viaje_id, estado), parcial (promocion_id) WHERE estado = 'pagado'.
+  - viaje: (bus_id, salida), (ruta_id).
+  - tarifa: (ruta_id, origen_pos, destino_pos, id_tarifa).
+  - incidencia: (viaje_id, tipo).
+  - encomienda: GIN jsonb_path_ops sobre atributos, y (viaje_id).
+  - Metas: disponibilidad, ocupación, ingresos y manifiesto < 5 ms; buscar_encomiendas < 2 ms;
+    generador < 10 min (sin barridos completos de pasaje en cada venta).
+  '''
+}
+
+// =====================================================
+// RELACIONES COMPUESTAS
+// =====================================================
+
+// Épica 1: las posiciones de la tarifa deben existir en la ruta.
 Ref: tarifa.(ruta_id, origen_pos) > ruta_parada.(ruta_id, posicion)
 Ref: tarifa.(ruta_id, destino_pos) > ruta_parada.(ruta_id, posicion)
+
+// Épica 5: la encomienda apunta a la versión exacta del tipo usada al registrarla.
+Ref: encomienda.(tipo, tipo_version) > tipo_encomienda.(tipo, version)
