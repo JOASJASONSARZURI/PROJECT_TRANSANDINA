@@ -28,6 +28,8 @@ Si una propuesta fue rechazada o modificada, explicar qué se cambió y por qué
 | 8 | 23-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | Revisión del DBML, HU-01 a HU-04 | Preguntar si el DBML tenía incoherencias y pedir corregir los errores pequeños. | Señalé que `tarifa.ruta_id` no declaraba FK directa a `ruta` y que la nota del índice GIN mencionaba `jsonb_path_ops` sin configurarlo explícitamente; propuse añadir la FK y aclarar la nota. | Parcial; la FK directa es clara, pero aclarar una nota no configura la clase de operador del índice. | Revisión visual del DBML; no se ejecutó en dbdiagram.io ni en PostgreSQL. Al actualizar esta bitácora, la versión actual consultada ya no muestra la FK directa ni la nota aclarada; confirmar cuál es el modelo definitivo. | Se hicieron esas ediciones en una versión anterior. Revisar si deben reaplicarse; no afirmar que `jsonb_path_ops` está configurado por la nota. |
 | 9 | 23-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | Bitácora de uso de IA, Épicas 1 a 5 | Pedir que se actualice la bitácora con la bitácora de Claude y se agreguen las interacciones de Copilot; también se señaló que faltaba registrar Épica 2. | Se integraron las siete entradas atribuidas a Claude y se añadieron las interacciones de Copilot, conservando explícitamente las verificaciones pendientes. | Sí, como registro documental; no valida técnicamente las propuestas. | Comparación de las entradas con `bitacora_claude.md` y con el historial de esta conversación; conteo de nueve registros. | Se consolidaron las entradas en esta tabla. Completar nombres y actualizar estados solo con evidencia de pruebas reales. |
 | 10 | 23-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | Diagrama ER y trazabilidad, épicas 1 a 5 | Pedir que el diagrama ER elaborado por el integrante se ajuste a la consigna crow's foot y se documente en un archivo Markdown con la trazabilidad y la justificación de columnas, tablas y JSONB. | Di formato Mermaid crow's foot al diagrama existente, añadí la matriz de trazabilidad de historias, tablas y restricciones, y documenté las decisiones de modelado. | Parcial: se verificó el formato y su correspondencia documental, no la ejecución del modelo ni todas las reglas en PostgreSQL. | Comparé entidades y relaciones con `transAndinaDBML.dbml` y revisé la sintaxis ER de Mermaid; no ejecuté SQL ni validé el modelo en PostgreSQL. | El diagrama ER original fue elaborado por Sarzuri Mamani Joas Jason. Copilot solo lo formateó según la consigna y preparó `grupoN_diagrama.md`; el DBML original no se modificó en esta tarea. |
+| 11 | 24-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | `grupoN.sql`, HU-01 a HU-21 y pruebas SQL | Pedir corregir detalles del script y preparar `grupoN_pruebas.sql` con al menos un caso exitoso y uno fallido por historia de usuario. | Ajusté la coherencia de `precio_vendido` con el DBML y agregué una validación para que el redondeo de un descuento no produzca precio cero; preparé 42 casos comentados en `grupoN_pruebas.sql`, con fixtures y `ROLLBACK`. | Parcial: la coherencia y cobertura se revisaron estáticamente; las pruebas no se ejecutaron porque `psql` no está disponible. | Comparé el CHECK de precio con `transAndinaDBML.dbml`; conté los 42 casos (21 positivos y 21 negativos), revisé la ausencia de comandos de psql y el `ROLLBACK` final. | Mantener los tipos iniciales de encomienda en el script de instalación, no duplicarlos en las pruebas. Ejecutar el script de pruebas en PostgreSQL 16 antes de afirmar que pasa. |
+| 12 | 24-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | HU-15, informe de rendimiento | Preguntar qué significa `grupoN_rendimiento.pdf` según el documento original y el contexto del proyecto. | Expliqué que debe reunir el tiempo y avisos del generador de volumen, los `EXPLAIN ANALYZE` solicitados con y sin los índices correspondientes y la justificación de los índices. | Sí, como interpretación documental; no constituye una medición de rendimiento. | Contrasté la consigna en `Proyecto Final BD2 — TransAndina.md` y `Proyecto_Final_BD2_TransAndina(CONTEXTO).md`, y los índices de `grupoN.sql`. | No se generó el PDF ni se inventaron resultados: `generar_volumen.sql` lo entrega el docente y no se ejecutó PostgreSQL en este entorno. |
 
 > Mantener entre 8 y 15 entradas antes de entregar el documento. Agregar o eliminar filas según el trabajo real del grupo.
 
@@ -75,51 +77,21 @@ Registrar si se aceptó, rechazó o modificó la propuesta.
 
 ## 3. Reflexión sobre el error más difícil de detectar
 
-[Completar con un error real encontrado durante el proyecto.]
-
-Puede responder:
-
-- ¿Qué sugirió inicialmente la inteligencia artificial?
-- ¿Por qué parecía correcta?
-- ¿Qué requisito no se estaba considerando?
-- ¿Cómo se descubrió el problema?
-- ¿Qué cambio realizó el grupo?
-- ¿Qué prueba demuestra que quedó corregido?
+En la revisión estática del script se detectó que el CHECK de `precio_vendido` debía coincidir con el DBML (`precio_vendido > 0`). Además, un descuento redondeado podía dejar el precio final en cero y causar un rechazo al insertar el pasaje. Se alineó la restricción y se añadió una validación explícita antes de insertar. Se verificó comparando los archivos, pero queda pendiente probarlo en PostgreSQL 16; no se debe considerar validado en ejecución.
 
 ## 4. Decisiones tomadas en contra de propuestas de la IA
 
-[Completar con decisiones reales del grupo.]
-
-Registrar al menos una situación en la que no se aceptó una propuesta. Puede incluir:
-
-- Una alternativa de modelado rechazada.
-- Una validación que inicialmente se hizo en la aplicación.
-- Un tipo de dato que no era adecuado.
-- Un índice innecesario.
-- Una función que no cumplía la firma exacta.
-- Una consulta más costosa que una alternativa normalizada.
-
-Incluir el motivo técnico y el enfoque final adoptado.
+Se mantuvo la autoría del diagrama ER en Sarzuri Mamani Joas Jason: Copilot solo aplicó el formato solicitado y añadió la trazabilidad, como consta en la entrada 10. También se decidió no presentar tiempos ni planes de rendimiento sin el generador y una ejecución real de PostgreSQL; el informe de rendimiento sigue pendiente de evidencia.
 
 ## 5. Contexto proporcionado a la inteligencia artificial
 
-[Completar con el contexto real que recibió la herramienta.]
-
-Indicar:
-
-- Qué documentos o fragmentos del proyecto se proporcionaron.
-- Qué requisitos se comunicaron.
-- Qué restricción técnica se indicó.
-- Qué limitaciones se incluyeron.
-- Qué formatos o firmas debían respetarse.
-
-Explicar en qué mejoró la calidad de las respuestas o qué información faltó.
+Se proporcionaron el documento original y su versión de contexto, `transAndinaDBML.dbml`, el script SQL y los requisitos de entrega. Se indicó respetar PostgreSQL 16, no incluir comandos de psql, distinguir datos iniciales de pruebas y no crear otros entregables que aún no se habían solicitado. Este contexto permitió relacionar el SQL y las pruebas con las historias de usuario; faltó el generador de volumen del docente y un servidor PostgreSQL para validar ejecuciones.
 
 ## 6. Evidencia técnica del trabajo
 
 - [ ] Casos de prueba exitosos.
 - [ ] Casos de prueba con resultados de error.
-- [ ] Archivo SQL de pruebas.
+- [x] Archivo SQL de pruebas.
 - [ ] Diagrama revisado.
 - [ ] Trazabilidad completada.
 - [ ] EXPLAIN ANALYZE con índices.
