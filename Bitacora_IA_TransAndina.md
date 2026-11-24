@@ -4,9 +4,7 @@ Proyecto: **TransAndina**
 Curso: **Bases de Datos II**  
 Integrantes del grupo:
 
-- [Nombre 1]
-- [Nombre 2]
-- [Nombre 3]
+- Sarzuri Mamani Joas Jason
 
 ## Instrucciones de uso
 
@@ -20,12 +18,15 @@ Si una propuesta fue rechazada o modificada, explicar qué se cambió y por qué
 
 | N. | Fecha | Integrante | Herramienta | Historia o tema | Prompt realizado | Respuesta o propuesta recibida | ¿Era correcto? | Cómo se verificó | Cambios o decisión final |
 |---:|---|---|---|---|---|---|---|---|---|
-| 1 | DD-MM-AAAA | [Nombre] | [Herramienta] | [HU o tema] | [Resumen fiel del prompt] | [Resumen de la propuesta] | [Sí / Parcialmente / No / Pendiente] | [Documento, consulta, prueba o revisión usada] | [Qué decidió el grupo] |
-| 2 | DD-MM-AAAA | [Nombre] | [Herramienta] | [HU o tema] | [Resumen fiel del prompt] | [Resumen de la propuesta] | [Sí / Parcialmente / No / Pendiente] | [Documento, consulta, prueba o revisión usada] | [Qué decidió el grupo] |
-| 3 | DD-MM-AAAA | [Nombre] | [Herramienta] | [HU o tema] | [Resumen fiel del prompt] | [Resumen de la propuesta] | [Sí / Parcialmente / No / Pendiente] | [Documento, consulta, prueba o revisión usada] | [Qué decidió el grupo] |
-| 4 | DD-MM-AAAA | [Nombre] | [Herramienta] | [HU o tema] | [Resumen fiel del prompt] | [Resumen de la propuesta] | [Sí / Parcialmente / No / Pendiente] | [Documento, consulta, prueba o revisión usada] | [Qué decidió el grupo] |
-| 5 | DD-MM-AAAA | [Nombre] | [Herramienta] | [HU o tema] | [Resumen fiel del prompt] | [Resumen de la propuesta] | [Sí / Parcialmente / No / Pendiente] | [Documento, consulta, prueba o revisión usada] | [Qué decidió el grupo] |
-| 6 | DD-MM-AAAA | [Nombre] | [Herramienta] | Épica 1: HU-01, HU-02, HU-03 y HU-04 | Solicitar un esquema DBML para el diagrama crow's foot de la configuración del servicio en dbdiagram.io. | Propuso las tablas `ciudad`, `ruta`, `ruta_parada`, `bus`, `asiento`, `viaje` y `tarifa`; restricciones únicas y CHECK; JSONB para amenidades; EXCLUDE para viajes cruzados; relaciones compuestas para tarifas. | Pendiente | Completar con revisión del diagrama, ejecución del modelo y pruebas de las HU-01 a HU-04. | Completar después de comparar el DBML con el modelo SQL definitivo y corregir cualquier diferencia. |
+| 1 | 20-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-01 a HU-04 | Compartir el diseño de la Épica 1 y pedir el código DBML. | Propuso el modelo de rutas, ciudades, paradas, buses, asientos, viajes y tarifas, con restricciones, JSONB e índices; anotó reglas que DBML no expresa. | Parcial; en una revisión posterior se señalaron dos problemas (entrada 2). | Según la bitácora de Claude, no se documentó una prueba ejecutada; completar con la revisión y pruebas reales del grupo. | Véase la entrada 2; no considerar el diseño probado hasta validarlo. |
+| 2 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-04 | Preguntar si el backlog modificaba la respuesta anterior de DBML. | La IA identificó que usar `creada_en` para determinar la tarifa vigente podía empatar dentro de una transacción y que `numeric(10,2)` redondea valores sin avisar. | Parcial; los problemas se detectaron mediante revisión, no con pruebas documentadas. | La bitácora de Claude propone probar dos llamadas a `fn_fijar_tarifa` dentro de una transacción; esa prueba queda pendiente. | Se registró usar el mayor `id_tarifa` como vigente, `numeric` sin precisión fija y `clock_timestamp()` para `creada_en`. |
+| 3 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-01 a HU-04 | Pedir el código completo listo para copiar y pegar. | Entregó el DBML consolidado de la Épica 1. | Pendiente de validar completamente. | La bitácora de Claude indica que falta confirmar que dbdiagram.io acepta los bloques `checks`. | Completar con el resultado real de importar el modelo. |
+| 4 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-05 a HU-10 y HU-16 | Compartir las entidades PASAJERO, PASAJE y PROMOCION y las historias de la Épica 2. | Propuso una tabla `pasaje` para ventas y reservas, condiciones JSONB para promociones, bloqueo de solapes y un `id_asiento` para una FK simple. | Parcial; la estrategia de bloqueo se revisó después (entrada 6). | La bitácora de Claude deja pendientes las pruebas y la decisión del grupo sobre `id_asiento`. | Se documentó la revisión posterior de concurrencia; el grupo debe decidir si mantiene el identificador de asiento. |
+| 5 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-11, HU-12, HU-13, HU-17 y HU-18 | Compartir las entidades INCIDENCIA y AUDITORIA y las historias de la Épica 3. | Propuso validación de incidencias, auditoría sin FK a las tablas auditadas, triggers y reportes sobre `pasaje`; advirtió una posible tensión entre auditar DELETE y no borrar ventas. | Sin verificar. | La bitácora de Claude propone probar valores y orden de creación; las pruebas quedan pendientes. | Completar después de validar el SQL y decidir cómo resolver el conflicto señalado. |
+| 6 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-07 y HU-14 | Compartir la Épica 4 sobre venta simultánea y rendimiento. | Revisó la propuesta de bloqueo y planteó restricciones `EXCLUDE` con rangos para evitar solapes de asiento y pasajero; propuso estado `vencido` para reservas vencidas. | Pendiente de probar. | La bitácora de Claude propone una prueba con dos sesiones simultáneas; no se registra como ejecutada. | La solución y sus estados deben validarse con la prueba concurrente antes de darlos por correctos. |
+| 7 | 23-11-2026 | Sarzuri Mamani Joas Jason | Claude (Sonnet 5.5) | HU-19, HU-20 y HU-21 | Compartir los tipos de encomienda, encomiendas y las historias de la Épica 5. | Propuso tipos versionados, validación de destinatario y tipo, y búsqueda con `@>` e índice GIN; añadió una regla sobre nombres de campos reservados que no estaba en el backlog. | Sin verificar; la regla extra requiere decisión del grupo. | La bitácora de Claude deja pendientes las pruebas con datos inválidos y redefinición de tipos. | Completar pruebas y decidir si se conserva la regla adicional. |
+| 8 | 23-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | Revisión del DBML, HU-01 a HU-04 | Preguntar si el DBML tenía incoherencias y pedir corregir los errores pequeños. | Señalé que `tarifa.ruta_id` no declaraba FK directa a `ruta` y que la nota del índice GIN mencionaba `jsonb_path_ops` sin configurarlo explícitamente; propuse añadir la FK y aclarar la nota. | Parcial; la FK directa es clara, pero aclarar una nota no configura la clase de operador del índice. | Revisión visual del DBML; no se ejecutó en dbdiagram.io ni en PostgreSQL. Al actualizar esta bitácora, la versión actual consultada ya no muestra la FK directa ni la nota aclarada; confirmar cuál es el modelo definitivo. | Se hicieron esas ediciones en una versión anterior. Revisar si deben reaplicarse; no afirmar que `jsonb_path_ops` está configurado por la nota. |
+| 9 | 23-11-2026 | Sarzuri Mamani Joas Jason | GitHub Copilot (VS Code) | Bitácora de uso de IA, Épicas 1 a 5 | Pedir que se actualice la bitácora con la bitácora de Claude y se agreguen las interacciones de Copilot; también se señaló que faltaba registrar Épica 2. | Se integraron las siete entradas atribuidas a Claude y se añadieron las interacciones de Copilot, conservando explícitamente las verificaciones pendientes. | Sí, como registro documental; no valida técnicamente las propuestas. | Comparación de las entradas con `bitacora_claude.md` y con el historial de esta conversación; conteo de nueve registros. | Se consolidaron las entradas en esta tabla. Completar nombres y actualizar estados solo con evidencia de pruebas reales. |
 
 > Mantener entre 8 y 15 entradas antes de entregar el documento. Agregar o eliminar filas según el trabajo real del grupo.
 
@@ -111,7 +112,7 @@ Indicar:
 - Qué limitaciones se incluyeron.
 - Qué formatos o firmas debían respetarse.
 
-Explicar en qué mejoraó la calidad de las respuestas o qué información faltó.
+Explicar en qué mejoró la calidad de las respuestas o qué información faltó.
 
 ## 6. Evidencia técnica del trabajo
 
